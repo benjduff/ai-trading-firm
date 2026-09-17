@@ -3,7 +3,8 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.models import CreateResearchRequest, ResearchJob
+from app.requests import CreateResearchRequest
+from app.schemas import ResearchJob
 
 app = FastAPI(
     title="AI Trading Firm API",
