@@ -3,8 +3,11 @@ name = "api"
 version = "0.1.0"
 requires-python = ">=3.9"
 dependencies = [
+    "alembic>=1.13",
     "fastapi[standard]>=0.128.8",
+    "psycopg[binary]>=3.1",
     "pydantic-settings>=2.11.0",
+    "sqlalchemy>=2.0",
 ]
 [tool.fastapi]
 entrypoint = "app.main:app"

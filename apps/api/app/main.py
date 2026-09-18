@@ -1,8 +1,11 @@
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
+from app.db import get_db
+from app.db_models import ResearchJobRecord
 from app.requests import CreateResearchRequest
 from app.schemas import ResearchJob
 
@@ -18,8 +21,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-research_jobs: dict[UUID, ResearchJob] = {}
-
 
 @app.get("/health")
 async def health():
@@ -30,15 +31,19 @@ async def health():
 
 
 @app.post("/research", status_code=201)
-async def create_research(request: CreateResearchRequest) -> ResearchJob:
-    job = ResearchJob(ticker=request.ticker)
-    research_jobs[job.id] = job
-    return job
+async def create_research(
+    request: CreateResearchRequest, db: Session = Depends(get_db)
+) -> ResearchJob:
+    record = ResearchJobRecord(ticker=request.ticker)
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return ResearchJob.model_validate(record)
 
 
 @app.get("/research/{job_id}")
-async def get_research(job_id: UUID) -> ResearchJob:
-    job = research_jobs.get(job_id)
-    if job is None:
+async def get_research(job_id: UUID, db: Session = Depends(get_db)) -> ResearchJob:
+    record = db.get(ResearchJobRecord, job_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="research job not found")
-    return job
+    return ResearchJob.model_validate(record)
