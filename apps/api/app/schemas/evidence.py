@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EvidenceSource(str, Enum):
@@ -18,6 +18,8 @@ class EvidenceSource(str, Enum):
 
 class Evidence(BaseModel):
     """claim -> source -> timestamp -> extracted evidence, with point-in-time integrity."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID = Field(default_factory=uuid4)
     ticker: str
