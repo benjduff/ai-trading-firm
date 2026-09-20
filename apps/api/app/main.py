@@ -15,6 +15,7 @@ from app.db import get_db
 from app.db_models import (
     EvidenceRecord,
     FundamentalReportRecord,
+    HumanDecisionRecord,
     PsychologyReportRecord,
     QuantMetricsRecord,
     RedTeamReportRecord,
@@ -31,14 +32,16 @@ from app.llm import (
 from app.quant.analysis import DEFAULT_BENCHMARK_TICKER, run_quant_analysis
 from app.quant.market_data import MarketDataError
 from app.quant.risk import assess_risk
-from app.requests import CreateResearchRequest
+from app.requests import CreateHumanDecisionRequest, CreateResearchRequest
 from app.schemas import (
     Evidence,
     FundamentalReport,
+    HumanDecision,
     PsychologyReport,
     QuantMetrics,
     RedTeamReport,
     ResearchJob,
+    ResearchSummary,
     RiskAssessment,
     TradeProposal,
 )
@@ -490,3 +493,96 @@ async def get_trade_proposal(
         .all()
     )
     return [TradeProposal.model_validate(row) for row in rows]
+
+
+@app.get("/research/{job_id}/summary")
+async def get_research_summary(
+    job_id: UUID, db: Session = Depends(get_db)
+) -> ResearchSummary:
+    job = _get_job_or_404(job_id, db)
+
+    def _latest(model, timestamp_column):
+        return (
+            db.query(model)
+            .filter(model.research_job_id == job_id)
+            .order_by(timestamp_column.desc())
+            .first()
+        )
+
+    evidence_rows = (
+        db.query(EvidenceRecord).filter(EvidenceRecord.ticker == job.ticker).all()
+    )
+    fundamental_row = _latest(FundamentalReportRecord, FundamentalReportRecord.created_at)
+    psychology_row = _latest(PsychologyReportRecord, PsychologyReportRecord.created_at)
+    red_team_row = _latest(RedTeamReportRecord, RedTeamReportRecord.created_at)
+    quant_row = _latest(QuantMetricsRecord, QuantMetricsRecord.computed_at)
+    risk_row = _latest(RiskAssessmentRecord, RiskAssessmentRecord.computed_at)
+    trade_proposal_row = _latest(TradeProposalRecord, TradeProposalRecord.created_at)
+    decision_row = _latest(HumanDecisionRecord, HumanDecisionRecord.decided_at)
+
+    return ResearchSummary(
+        job=ResearchJob.model_validate(job),
+        evidence=[Evidence.model_validate(row) for row in evidence_rows],
+        fundamental_report=FundamentalReport.model_validate(fundamental_row)
+        if fundamental_row
+        else None,
+        psychology_report=PsychologyReport.model_validate(psychology_row)
+        if psychology_row
+        else None,
+        red_team_report=RedTeamReport.model_validate(red_team_row) if red_team_row else None,
+        quant_metrics=QuantMetrics.model_validate(quant_row) if quant_row else None,
+        risk_assessment=RiskAssessment.model_validate(risk_row) if risk_row else None,
+        trade_proposal=TradeProposal.model_validate(trade_proposal_row)
+        if trade_proposal_row
+        else None,
+        human_decision=HumanDecision.model_validate(decision_row) if decision_row else None,
+    )
+
+
+@app.post("/research/{job_id}/decision", status_code=201)
+def record_human_decision(
+    job_id: UUID, request: CreateHumanDecisionRequest, db: Session = Depends(get_db)
+) -> HumanDecision:
+    job = _get_job_or_404(job_id, db)
+
+    trade_proposal_row = (
+        db.query(TradeProposalRecord)
+        .filter(TradeProposalRecord.research_job_id == job_id)
+        .order_by(TradeProposalRecord.created_at.desc())
+        .first()
+    )
+    if trade_proposal_row is None:
+        raise HTTPException(
+            status_code=400,
+            detail="no trade proposal for this job yet; synthesize one first",
+        )
+
+    record = HumanDecisionRecord(
+        research_job_id=job.id,
+        trade_proposal_id=trade_proposal_row.id,
+        action=request.action.value,
+        reasoning=request.reasoning,
+        decided_by=request.decided_by,
+    )
+    db.add(record)
+
+    job.status = ResearchJobStatus.HUMAN_DECISION_RECORDED.value
+    db.add(job)
+    db.commit()
+    db.refresh(record)
+
+    return HumanDecision.model_validate(record)
+
+
+@app.get("/research/{job_id}/decision")
+async def list_human_decisions(
+    job_id: UUID, db: Session = Depends(get_db)
+) -> list[HumanDecision]:
+    _get_job_or_404(job_id, db)
+    rows = (
+        db.query(HumanDecisionRecord)
+        .filter(HumanDecisionRecord.research_job_id == job_id)
+        .order_by(HumanDecisionRecord.decided_at.desc())
+        .all()
+    )
+    return [HumanDecision.model_validate(row) for row in rows]

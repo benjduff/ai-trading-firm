@@ -1,8 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { API_URL, extractErrorMessage } from "@/lib/api";
 
 type ResearchJob = {
   id: string;
@@ -12,23 +12,6 @@ type ResearchJob = {
   as_of: string;
   requested_by: string | null;
 };
-
-function extractErrorMessage(body: unknown): string {
-  if (
-    body &&
-    typeof body === "object" &&
-    "detail" in body &&
-    Array.isArray((body as { detail: unknown }).detail)
-  ) {
-    const detail = (body as { detail: { msg?: string }[] }).detail;
-    const msg = detail[0]?.msg ?? "Request failed";
-    return msg.replace(/^Value error,\s*/, "");
-  }
-  if (body && typeof body === "object" && "detail" in body) {
-    return String((body as { detail: unknown }).detail);
-  }
-  return "Request failed";
-}
 
 export default function Home() {
   const [ticker, setTicker] = useState("");
@@ -101,6 +84,12 @@ export default function Home() {
               <dt className="text-zinc-500 dark:text-zinc-400">Status</dt>
               <dd>{job.status}</dd>
             </dl>
+            <Link
+              href={`/research/${job.id}`}
+              className="mt-3 inline-block text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              View research &rarr;
+            </Link>
           </div>
         )}
       </main>

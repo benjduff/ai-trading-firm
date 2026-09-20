@@ -15,6 +15,7 @@ class ResearchJobStatus(str, Enum):
     QUANT_ANALYSIS_COMPLETE = "quant_analysis_complete"
     RISK_ASSESSMENT_COMPLETE = "risk_assessment_complete"
     TRADE_PROPOSAL_COMPLETE = "trade_proposal_complete"
+    HUMAN_DECISION_RECORDED = "human_decision_recorded"
 
 
 class ResearchJob(BaseModel):

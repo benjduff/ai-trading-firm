@@ -229,3 +229,23 @@ class TradeProposalRecord(Base):
         PG_UUID(as_uuid=True), nullable=True
     )
     evidence: Mapped[list] = mapped_column(PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False)
+
+
+class HumanDecisionRecord(Base):
+    __tablename__ = "human_decisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    research_job_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    trade_proposal_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False
+    )
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    reasoning: Mapped[str] = mapped_column(Text, nullable=False)
+    decided_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
