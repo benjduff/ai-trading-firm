@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-5.5"
+    openai_red_team_model: str = "gpt-5.5-pro"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -8,17 +8,29 @@ from sqlalchemy.orm import Session
 
 from app.agents.fundamental import run_fundamental_analysis
 from app.agents.psychology import run_psychology_analysis
+from app.agents.red_team import run_red_team_analysis
 from app.db import get_db
 from app.db_models import (
     EvidenceRecord,
     FundamentalReportRecord,
     PsychologyReportRecord,
+    RedTeamReportRecord,
     ResearchJobRecord,
 )
 from app.ingestion.sec_edgar import TickerNotFoundError, fetch_filing_evidence
-from app.llm import ModelGatewayNotConfiguredError, get_default_gateway
+from app.llm import (
+    ModelGatewayNotConfiguredError,
+    get_default_gateway,
+    get_red_team_gateway,
+)
 from app.requests import CreateResearchRequest
-from app.schemas import Evidence, FundamentalReport, PsychologyReport, ResearchJob
+from app.schemas import (
+    Evidence,
+    FundamentalReport,
+    PsychologyReport,
+    RedTeamReport,
+    ResearchJob,
+)
 from app.schemas.research_job import ResearchJobStatus
 
 app = FastAPI(
@@ -222,3 +234,77 @@ async def get_psychology_report(
         .all()
     )
     return [PsychologyReport.model_validate(row) for row in rows]
+
+
+def _format_fundamental_thesis(report: FundamentalReportRecord) -> str:
+    return "\n".join(
+        [
+            f"Summary: {report.summary}",
+            "Key findings: " + "; ".join(report.key_findings),
+            f"Financial health: {report.financial_health}",
+            f"Valuation view: {report.valuation_view}",
+            "Catalysts: " + "; ".join(report.catalysts),
+            "Risks already noted: " + "; ".join(report.risks),
+        ]
+    )
+
+
+@app.post("/research/{job_id}/analyze/red-team", status_code=201)
+def analyze_red_team(job_id: UUID, db: Session = Depends(get_db)) -> RedTeamReport:
+    job = _get_job_or_404(job_id, db)
+    evidence = _get_evidence_or_400(job.ticker, db)
+
+    fundamental = (
+        db.query(FundamentalReportRecord)
+        .filter(FundamentalReportRecord.research_job_id == job_id)
+        .order_by(FundamentalReportRecord.created_at.desc())
+        .first()
+    )
+    if fundamental is None:
+        raise HTTPException(
+            status_code=400,
+            detail="no fundamental report for this job yet; run fundamental analysis first",
+        )
+
+    try:
+        gateway = get_red_team_gateway()
+    except ModelGatewayNotConfiguredError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        report = run_red_team_analysis(
+            gateway,
+            job.id,
+            job.ticker,
+            evidence,
+            _format_fundamental_thesis(fundamental),
+        )
+    except openai.OpenAIError as e:
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
+
+    record = RedTeamReportRecord(
+        **report.model_dump(exclude={"agent_type"}),
+        agent_type=report.agent_type.value,
+    )
+    db.add(record)
+
+    job.status = ResearchJobStatus.RED_TEAM_ANALYSIS_COMPLETE.value
+    db.add(job)
+    db.commit()
+    db.refresh(record)
+
+    return RedTeamReport.model_validate(record)
+
+
+@app.get("/research/{job_id}/red-team-report")
+async def get_red_team_report(
+    job_id: UUID, db: Session = Depends(get_db)
+) -> list[RedTeamReport]:
+    _get_job_or_404(job_id, db)
+    rows = (
+        db.query(RedTeamReportRecord)
+        .filter(RedTeamReportRecord.research_job_id == job_id)
+        .order_by(RedTeamReportRecord.created_at.desc())
+        .all()
+    )
+    return [RedTeamReport.model_validate(row) for row in rows]

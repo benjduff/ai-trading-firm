@@ -77,6 +77,31 @@ class FundamentalReportRecord(Base):
     evidence: Mapped[list] = mapped_column(PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False)
 
 
+class RedTeamReportRecord(Base):
+    __tablename__ = "red_team_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    research_job_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False)
+    agent_type: Mapped[str] = mapped_column(String(32), nullable=False, default="red_team")
+    model_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    independent_bear_case: Mapped[str] = mapped_column(Text, nullable=False)
+    key_risks: Mapped[list] = mapped_column(PG_ARRAY(Text), nullable=False)
+    thesis_challenges: Mapped[list] = mapped_column(PG_ARRAY(Text), nullable=False)
+    weakest_point_in_thesis: Mapped[str] = mapped_column(Text, nullable=False)
+    what_would_invalidate_the_bear_case: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[list] = mapped_column(PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False)
+
+
 class PsychologyReportRecord(Base):
     __tablename__ = "psychology_reports"
 
