@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ResearchJobStatus(str, Enum):
     PENDING = "pending"
     EVIDENCE_INGESTED = "evidence_ingested"
+    FUNDAMENTAL_ANALYSIS_COMPLETE = "fundamental_analysis_complete"
 
 
 class ResearchJob(BaseModel):
