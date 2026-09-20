@@ -1,9 +1,24 @@
 from typing import Optional
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from app.schemas.agent_report import AgentReport, AgentType
+
+
+class PsychologyAnalysis(BaseModel):
+    """Fields the LLM is asked to produce for a psychology report."""
+
+    summary: str
+    market_temperature: int = Field(ge=-5, le=5)
+    expectation_gap: str
+    fear_of_loss: float = Field(ge=0, le=1)
+    fomo: float = Field(ge=0, le=1)
+    narrative_saturation: float = Field(ge=0, le=1)
+    crowding: float = Field(ge=0, le=1)
+    dominant_narrative: str
+    differentiated_or_contrarian_view: str
+    psychology_confidence: float = Field(ge=0, le=1)
 
 
 class PsychologyReport(AgentReport):

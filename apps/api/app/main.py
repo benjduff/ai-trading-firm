@@ -7,12 +7,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app.agents.fundamental import run_fundamental_analysis
+from app.agents.psychology import run_psychology_analysis
 from app.db import get_db
-from app.db_models import EvidenceRecord, FundamentalReportRecord, ResearchJobRecord
+from app.db_models import (
+    EvidenceRecord,
+    FundamentalReportRecord,
+    PsychologyReportRecord,
+    ResearchJobRecord,
+)
 from app.ingestion.sec_edgar import TickerNotFoundError, fetch_filing_evidence
 from app.llm import ModelGatewayNotConfiguredError, get_default_gateway
 from app.requests import CreateResearchRequest
-from app.schemas import Evidence, FundamentalReport, ResearchJob
+from app.schemas import Evidence, FundamentalReport, PsychologyReport, ResearchJob
 from app.schemas.research_job import ResearchJobStatus
 
 app = FastAPI(
@@ -60,6 +66,16 @@ def _get_job_or_404(job_id: UUID, db: Session) -> ResearchJobRecord:
     if record is None:
         raise HTTPException(status_code=404, detail="research job not found")
     return record
+
+
+def _get_evidence_or_400(ticker: str, db: Session) -> list[Evidence]:
+    rows = db.query(EvidenceRecord).filter(EvidenceRecord.ticker == ticker).all()
+    if not rows:
+        raise HTTPException(
+            status_code=400,
+            detail="no evidence for this ticker yet; ingest evidence first",
+        )
+    return [Evidence.model_validate(row) for row in rows]
 
 
 @app.post("/research/{job_id}/ingest/sec-edgar", status_code=201)
@@ -113,16 +129,7 @@ def analyze_fundamental(
     job_id: UUID, db: Session = Depends(get_db)
 ) -> FundamentalReport:
     job = _get_job_or_404(job_id, db)
-
-    evidence_rows = (
-        db.query(EvidenceRecord).filter(EvidenceRecord.ticker == job.ticker).all()
-    )
-    if not evidence_rows:
-        raise HTTPException(
-            status_code=400,
-            detail="no evidence for this ticker yet; ingest evidence first",
-        )
-    evidence = [Evidence.model_validate(row) for row in evidence_rows]
+    evidence = _get_evidence_or_400(job.ticker, db)
 
     try:
         gateway = get_default_gateway()
@@ -160,3 +167,58 @@ async def get_fundamental_report(
         .all()
     )
     return [FundamentalReport.model_validate(row) for row in rows]
+
+
+@app.post("/research/{job_id}/analyze/psychology", status_code=201)
+def analyze_psychology(
+    job_id: UUID, db: Session = Depends(get_db)
+) -> PsychologyReport:
+    job = _get_job_or_404(job_id, db)
+    evidence = _get_evidence_or_400(job.ticker, db)
+
+    try:
+        gateway = get_default_gateway()
+    except ModelGatewayNotConfiguredError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    previous_state = (
+        db.query(PsychologyReportRecord)
+        .filter(PsychologyReportRecord.ticker == job.ticker)
+        .order_by(PsychologyReportRecord.created_at.desc())
+        .first()
+    )
+    previous_state_id = previous_state.id if previous_state else None
+
+    try:
+        report = run_psychology_analysis(
+            gateway, job.id, job.ticker, evidence, previous_state_id
+        )
+    except openai.OpenAIError as e:
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
+
+    record = PsychologyReportRecord(
+        **report.model_dump(exclude={"agent_type"}),
+        agent_type=report.agent_type.value,
+    )
+    db.add(record)
+
+    job.status = ResearchJobStatus.PSYCHOLOGY_ANALYSIS_COMPLETE.value
+    db.add(job)
+    db.commit()
+    db.refresh(record)
+
+    return PsychologyReport.model_validate(record)
+
+
+@app.get("/research/{job_id}/psychology-report")
+async def get_psychology_report(
+    job_id: UUID, db: Session = Depends(get_db)
+) -> list[PsychologyReport]:
+    _get_job_or_404(job_id, db)
+    rows = (
+        db.query(PsychologyReportRecord)
+        .filter(PsychologyReportRecord.research_job_id == job_id)
+        .order_by(PsychologyReportRecord.created_at.desc())
+        .all()
+    )
+    return [PsychologyReport.model_validate(row) for row in rows]

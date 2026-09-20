@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -74,4 +74,36 @@ class FundamentalReportRecord(Base):
     valuation_view: Mapped[str] = mapped_column(Text, nullable=False)
     catalysts: Mapped[list] = mapped_column(PG_ARRAY(Text), nullable=False)
     risks: Mapped[list] = mapped_column(PG_ARRAY(Text), nullable=False)
+    evidence: Mapped[list] = mapped_column(PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False)
+
+
+class PsychologyReportRecord(Base):
+    __tablename__ = "psychology_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    research_job_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    agent_type: Mapped[str] = mapped_column(String(32), nullable=False, default="psychology")
+    model_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    market_temperature: Mapped[int] = mapped_column(Integer, nullable=False)
+    expectation_gap: Mapped[str] = mapped_column(Text, nullable=False)
+    fear_of_loss: Mapped[float] = mapped_column(Float, nullable=False)
+    fomo: Mapped[float] = mapped_column(Float, nullable=False)
+    narrative_saturation: Mapped[float] = mapped_column(Float, nullable=False)
+    crowding: Mapped[float] = mapped_column(Float, nullable=False)
+    dominant_narrative: Mapped[str] = mapped_column(Text, nullable=False)
+    differentiated_or_contrarian_view: Mapped[str] = mapped_column(Text, nullable=False)
+    psychology_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    previous_state_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("psychology_reports.id"), nullable=True
+    )
     evidence: Mapped[list] = mapped_column(PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False)
