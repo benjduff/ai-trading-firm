@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 
 import httpx
@@ -14,6 +15,7 @@ from app.db_models import (
     EvidenceRecord,
     FundamentalReportRecord,
     PsychologyReportRecord,
+    QuantMetricsRecord,
     RedTeamReportRecord,
     ResearchJobRecord,
 )
@@ -23,11 +25,14 @@ from app.llm import (
     get_default_gateway,
     get_red_team_gateway,
 )
+from app.quant.analysis import DEFAULT_BENCHMARK_TICKER, run_quant_analysis
+from app.quant.market_data import MarketDataError
 from app.requests import CreateResearchRequest
 from app.schemas import (
     Evidence,
     FundamentalReport,
     PsychologyReport,
+    QuantMetrics,
     RedTeamReport,
     ResearchJob,
 )
@@ -308,3 +313,51 @@ async def get_red_team_report(
         .all()
     )
     return [RedTeamReport.model_validate(row) for row in rows]
+
+
+@app.post("/research/{job_id}/analyze/quant", status_code=201)
+def analyze_quant(
+    job_id: UUID,
+    benchmark_ticker: str = DEFAULT_BENCHMARK_TICKER,
+    sector_ticker: Optional[str] = None,
+    lookback_days: int = 252,
+    db: Session = Depends(get_db),
+) -> QuantMetrics:
+    job = _get_job_or_404(job_id, db)
+
+    try:
+        metrics = run_quant_analysis(
+            job.id,
+            job.ticker,
+            lookback_days=lookback_days,
+            benchmark_ticker=benchmark_ticker,
+            sector_ticker=sector_ticker,
+        )
+    except MarketDataError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"market data request failed: {e}")
+
+    record = QuantMetricsRecord(**metrics.model_dump())
+    db.add(record)
+
+    job.status = ResearchJobStatus.QUANT_ANALYSIS_COMPLETE.value
+    db.add(job)
+    db.commit()
+    db.refresh(record)
+
+    return QuantMetrics.model_validate(record)
+
+
+@app.get("/research/{job_id}/quant-metrics")
+async def get_quant_metrics(
+    job_id: UUID, db: Session = Depends(get_db)
+) -> list[QuantMetrics]:
+    _get_job_or_404(job_id, db)
+    rows = (
+        db.query(QuantMetricsRecord)
+        .filter(QuantMetricsRecord.research_job_id == job_id)
+        .order_by(QuantMetricsRecord.computed_at.desc())
+        .all()
+    )
+    return [QuantMetrics.model_validate(row) for row in rows]
