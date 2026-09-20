@@ -6,11 +6,13 @@ from app.schemas.psychology import PsychologyAnalysis, PsychologyReport
 from app.schemas.quant import QuantMetrics
 from app.schemas.red_team import RedTeamChallenge, RedTeamIndependentView, RedTeamReport
 from app.schemas.research_job import ResearchJob, ResearchJobStatus
-from app.schemas.trade_proposal import TradeAction, TradeProposal
+from app.schemas.risk import RiskAssessment
+from app.schemas.trade_proposal import CIOSynthesis, TradeAction, TradeProposal
 
 __all__ = [
     "AgentReport",
     "AgentType",
+    "CIOSynthesis",
     "Evidence",
     "EvidenceSource",
     "FundamentalAnalysis",
@@ -25,6 +27,7 @@ __all__ = [
     "RedTeamReport",
     "ResearchJob",
     "ResearchJobStatus",
+    "RiskAssessment",
     "TradeAction",
     "TradeProposal",
 ]

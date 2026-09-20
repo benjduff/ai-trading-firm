@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
+from app.agents.cio import run_cio_synthesis
 from app.agents.fundamental import run_fundamental_analysis
 from app.agents.psychology import run_psychology_analysis
 from app.agents.red_team import run_red_team_analysis
@@ -18,6 +19,8 @@ from app.db_models import (
     QuantMetricsRecord,
     RedTeamReportRecord,
     ResearchJobRecord,
+    RiskAssessmentRecord,
+    TradeProposalRecord,
 )
 from app.ingestion.sec_edgar import TickerNotFoundError, fetch_filing_evidence
 from app.llm import (
@@ -27,6 +30,7 @@ from app.llm import (
 )
 from app.quant.analysis import DEFAULT_BENCHMARK_TICKER, run_quant_analysis
 from app.quant.market_data import MarketDataError
+from app.quant.risk import assess_risk
 from app.requests import CreateResearchRequest
 from app.schemas import (
     Evidence,
@@ -35,6 +39,8 @@ from app.schemas import (
     QuantMetrics,
     RedTeamReport,
     ResearchJob,
+    RiskAssessment,
+    TradeProposal,
 )
 from app.schemas.research_job import ResearchJobStatus
 
@@ -361,3 +367,126 @@ async def get_quant_metrics(
         .all()
     )
     return [QuantMetrics.model_validate(row) for row in rows]
+
+
+@app.post("/research/{job_id}/analyze/risk", status_code=201)
+def analyze_risk(job_id: UUID, db: Session = Depends(get_db)) -> RiskAssessment:
+    job = _get_job_or_404(job_id, db)
+
+    quant_row = (
+        db.query(QuantMetricsRecord)
+        .filter(QuantMetricsRecord.research_job_id == job_id)
+        .order_by(QuantMetricsRecord.computed_at.desc())
+        .first()
+    )
+    if quant_row is None:
+        raise HTTPException(
+            status_code=400,
+            detail="no quant metrics for this job yet; run quant analysis first",
+        )
+    quant_metrics = QuantMetrics.model_validate(quant_row)
+
+    assessment = assess_risk(job.id, job.ticker, quant_metrics)
+
+    record = RiskAssessmentRecord(**assessment.model_dump())
+    db.add(record)
+
+    job.status = ResearchJobStatus.RISK_ASSESSMENT_COMPLETE.value
+    db.add(job)
+    db.commit()
+    db.refresh(record)
+
+    return RiskAssessment.model_validate(record)
+
+
+@app.get("/research/{job_id}/risk-assessment")
+async def get_risk_assessment(
+    job_id: UUID, db: Session = Depends(get_db)
+) -> list[RiskAssessment]:
+    _get_job_or_404(job_id, db)
+    rows = (
+        db.query(RiskAssessmentRecord)
+        .filter(RiskAssessmentRecord.research_job_id == job_id)
+        .order_by(RiskAssessmentRecord.computed_at.desc())
+        .all()
+    )
+    return [RiskAssessment.model_validate(row) for row in rows]
+
+
+@app.post("/research/{job_id}/synthesize", status_code=201)
+def synthesize_trade_proposal(
+    job_id: UUID, db: Session = Depends(get_db)
+) -> TradeProposal:
+    job = _get_job_or_404(job_id, db)
+
+    def _latest(model, timestamp_column, label: str):
+        row = (
+            db.query(model)
+            .filter(model.research_job_id == job_id)
+            .order_by(timestamp_column.desc())
+            .first()
+        )
+        return row, label
+
+    lookups = [
+        _latest(FundamentalReportRecord, FundamentalReportRecord.created_at, "fundamental"),
+        _latest(PsychologyReportRecord, PsychologyReportRecord.created_at, "psychology"),
+        _latest(RedTeamReportRecord, RedTeamReportRecord.created_at, "red_team"),
+        _latest(QuantMetricsRecord, QuantMetricsRecord.computed_at, "quant"),
+        _latest(RiskAssessmentRecord, RiskAssessmentRecord.computed_at, "risk"),
+    ]
+    missing = [label for row, label in lookups if row is None]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"missing analysis for: {', '.join(missing)}; run those first",
+        )
+    fundamental_row, psychology_row, red_team_row, quant_row, risk_row = (
+        row for row, _ in lookups
+    )
+
+    try:
+        gateway = get_default_gateway()
+    except ModelGatewayNotConfiguredError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    try:
+        proposal = run_cio_synthesis(
+            gateway,
+            job.id,
+            job.ticker,
+            FundamentalReport.model_validate(fundamental_row),
+            PsychologyReport.model_validate(psychology_row),
+            RedTeamReport.model_validate(red_team_row),
+            QuantMetrics.model_validate(quant_row),
+            RiskAssessment.model_validate(risk_row),
+        )
+    except openai.OpenAIError as e:
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {e}")
+
+    record = TradeProposalRecord(
+        **proposal.model_dump(exclude={"action"}),
+        action=proposal.action.value,
+    )
+    db.add(record)
+
+    job.status = ResearchJobStatus.TRADE_PROPOSAL_COMPLETE.value
+    db.add(job)
+    db.commit()
+    db.refresh(record)
+
+    return TradeProposal.model_validate(record)
+
+
+@app.get("/research/{job_id}/trade-proposal")
+async def get_trade_proposal(
+    job_id: UUID, db: Session = Depends(get_db)
+) -> list[TradeProposal]:
+    _get_job_or_404(job_id, db)
+    rows = (
+        db.query(TradeProposalRecord)
+        .filter(TradeProposalRecord.research_job_id == job_id)
+        .order_by(TradeProposalRecord.created_at.desc())
+        .all()
+    )
+    return [TradeProposal.model_validate(row) for row in rows]

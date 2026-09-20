@@ -160,3 +160,72 @@ class QuantMetricsRecord(Base):
     cumulative_abnormal_return: Mapped[float] = mapped_column(Float, nullable=False)
     average_daily_volume: Mapped[float] = mapped_column(Float, nullable=False)
     sector_relative_return: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+
+class RiskAssessmentRecord(Base):
+    __tablename__ = "risk_assessments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    research_job_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    annualized_volatility: Mapped[float] = mapped_column(Float, nullable=False)
+    suggested_position_size_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_loss_distance_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    max_position_pct_cap: Mapped[float] = mapped_column(Float, nullable=False)
+    target_position_volatility_contribution_pct: Mapped[float] = mapped_column(
+        Float, nullable=False
+    )
+    notes: Mapped[list] = mapped_column(PG_ARRAY(Text), nullable=False)
+
+
+class TradeProposalRecord(Base):
+    __tablename__ = "trade_proposals"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    research_job_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    model_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    thesis: Mapped[str] = mapped_column(Text, nullable=False)
+    catalyst: Mapped[str] = mapped_column(Text, nullable=False)
+    expectation_gap: Mapped[str] = mapped_column(Text, nullable=False)
+    risk_notes: Mapped[str] = mapped_column(Text, nullable=False)
+    invalidation_conditions: Mapped[list] = mapped_column(PG_ARRAY(Text), nullable=False)
+    uncertainties: Mapped[list] = mapped_column(PG_ARRAY(Text), nullable=False)
+
+    entry_price_range: Mapped[Optional[list]] = mapped_column(PG_ARRAY(Float), nullable=True)
+    position_size_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    stop_loss_distance_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    fundamental_report_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    psychology_report_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    red_team_report_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    quant_metrics_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    risk_assessment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    evidence: Mapped[list] = mapped_column(PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False)

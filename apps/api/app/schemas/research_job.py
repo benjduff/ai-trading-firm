@@ -13,6 +13,8 @@ class ResearchJobStatus(str, Enum):
     PSYCHOLOGY_ANALYSIS_COMPLETE = "psychology_analysis_complete"
     RED_TEAM_ANALYSIS_COMPLETE = "red_team_analysis_complete"
     QUANT_ANALYSIS_COMPLETE = "quant_analysis_complete"
+    RISK_ASSESSMENT_COMPLETE = "risk_assessment_complete"
+    TRADE_PROPOSAL_COMPLETE = "trade_proposal_complete"
 
 
 class ResearchJob(BaseModel):
