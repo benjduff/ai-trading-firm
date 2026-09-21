@@ -15,8 +15,52 @@ SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:0>10}.json"
 ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession_no_dashes}/{document}"
 
 DEFAULT_FORMS = ("10-K", "10-Q", "8-K")
-EXCERPT_MAX_CHARS = 4000
+EXCERPT_MAX_CHARS = 6000
 INTER_REQUEST_DELAY_SECONDS = 0.2
+
+# Modern inline-XBRL 10-K/10-Q filings open with several pages of cover page,
+# table of contents, and a generic forward-looking-statements disclaimer before
+# any substantive discussion - a naive text[:N] excerpt is almost entirely
+# boilerplate. These patterns locate the real MD&A section and then skip ahead
+# to where actual figures start, verified against real OXY 10-Q/10-K filings.
+MDNA_HEADING_RE = re.compile(
+    r"management.{1,3}s discussion and analysis of financial condition and results of operations",
+    re.I,
+)
+# The real section (not a table-of-contents entry) conventionally opens with
+# this exact phrase across virtually all issuers' filings.
+MDNA_OPENING_PHRASE_RE = re.compile(r"the following discussion", re.I)
+# A TOC entry's heading is immediately followed by a page number.
+TOC_PAGE_NUMBER_RE = re.compile(r"^\s*\d{1,4}\b")
+# Proxy for "this paragraph contains real figures": dollar amounts, large
+# comma-grouped numbers, or percentages.
+FIGURE_DENSITY_RE = re.compile(r"\$|\d{2,3}(?:,\d{3})+|\d+\.\d+\s*%")
+CONTENT_DENSITY_WINDOW = 400
+CONTENT_DENSITY_THRESHOLD = 3
+CONTENT_SEARCH_RANGE = 20000
+
+
+def _find_mdna_start(text: str) -> int:
+    matches = list(MDNA_HEADING_RE.finditer(text))
+
+    for m in matches:
+        if MDNA_OPENING_PHRASE_RE.search(text[m.end() : m.end() + 120]):
+            return m.end()
+
+    for m in matches:
+        if not TOC_PAGE_NUMBER_RE.match(text[m.end() : m.end() + 30]):
+            return m.end()
+
+    return None
+
+
+def _find_content_start(text: str, search_from: int) -> int:
+    end = min(len(text), search_from + CONTENT_SEARCH_RANGE)
+    for pos in range(search_from, end, 100):
+        window = text[pos : pos + CONTENT_DENSITY_WINDOW]
+        if len(FIGURE_DENSITY_RE.findall(window)) >= CONTENT_DENSITY_THRESHOLD:
+            return pos
+    return search_from
 
 
 class SecEdgarError(Exception):
@@ -103,7 +147,11 @@ def extract_excerpt(html_bytes: bytes) -> str:
 
     text = soup.get_text(separator=" ", strip=True)
     text = re.sub(r"\s+", " ", text).strip()
-    return text[:EXCERPT_MAX_CHARS]
+
+    mdna_start = _find_mdna_start(text)
+    start = _find_content_start(text, mdna_start if mdna_start is not None else 0)
+
+    return text[start : start + EXCERPT_MAX_CHARS]
 
 
 def fetch_filing_evidence(
