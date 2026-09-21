@@ -87,6 +87,22 @@ type HumanDecision = {
   decided_at: string;
 };
 
+type ShadowPerformance = {
+  shadow_position: {
+    ticker: string;
+    action: string;
+    entry_price: number;
+    entry_price_as_of: string;
+    frozen_at: string;
+  };
+  current_price: number;
+  current_price_as_of: string;
+  days_since_frozen: number;
+  raw_price_return_pct: number;
+  shadow_return_pct: number;
+  human_decision_action: string | null;
+};
+
 type ResearchJob = {
   id: string;
   ticker: string;
@@ -184,6 +200,28 @@ export default function ResearchDashboard() {
   const [decidedBy, setDecidedBy] = useState("");
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
+
+  const [shadowPerformance, setShadowPerformance] = useState<ShadowPerformance | null>(null);
+  const [shadowLoading, setShadowLoading] = useState(false);
+  const [shadowError, setShadowError] = useState<string | null>(null);
+
+  async function fetchShadowPerformance() {
+    setShadowLoading(true);
+    setShadowError(null);
+    try {
+      const res = await fetch(`${API_URL}/research/${jobId}/shadow-performance`);
+      const body = await res.json();
+      if (!res.ok) {
+        setShadowError(extractErrorMessage(body));
+        return;
+      }
+      setShadowPerformance(body as ShadowPerformance);
+    } catch {
+      setShadowError("Could not reach the research API. Is it running?");
+    } finally {
+      setShadowLoading(false);
+    }
+  }
 
   const fetchSummary = useCallback(async () => {
     const result = await loadSummary(jobId);
@@ -355,6 +393,46 @@ export default function ResearchDashboard() {
               </div>
               {trade_proposal.model_id && (
                 <p className="text-xs text-zinc-500">Model: {trade_proposal.model_id}</p>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {trade_proposal && (
+          <Card title="Shadow Performance">
+            <div className="space-y-3 text-sm text-black dark:text-zinc-50">
+              <p className="text-xs text-zinc-500">
+                Frozen automatically when the proposal was synthesized, regardless of the human decision - this is how the firm grades its own calls against reality before risking real capital.
+              </p>
+              <button
+                onClick={fetchShadowPerformance}
+                disabled={shadowLoading}
+                className="rounded border border-black/[.15] px-3 py-1.5 text-sm font-medium text-black transition-colors hover:bg-black/[.04] disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50 dark:hover:bg-white/[.06]"
+              >
+                {shadowLoading ? "Checking..." : shadowPerformance ? "Refresh" : "Check shadow performance"}
+              </button>
+              {shadowError && (
+                <p className="text-red-600 dark:text-red-400">{shadowError}</p>
+              )}
+              {shadowPerformance && (
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+                  <dt className="text-zinc-500 dark:text-zinc-400">Entry price</dt>
+                  <dd>${shadowPerformance.shadow_position.entry_price.toFixed(2)} ({shadowPerformance.shadow_position.entry_price_as_of})</dd>
+                  <dt className="text-zinc-500 dark:text-zinc-400">Current price</dt>
+                  <dd>${shadowPerformance.current_price.toFixed(2)} ({shadowPerformance.current_price_as_of})</dd>
+                  <dt className="text-zinc-500 dark:text-zinc-400">Days since frozen</dt>
+                  <dd>{shadowPerformance.days_since_frozen}</dd>
+                  <dt className="text-zinc-500 dark:text-zinc-400">Shadow return ({shadowPerformance.shadow_position.action})</dt>
+                  <dd className={shadowPerformance.shadow_return_pct > 0 ? "text-green-600 dark:text-green-400" : shadowPerformance.shadow_return_pct < 0 ? "text-red-600 dark:text-red-400" : ""}>
+                    {pct(shadowPerformance.shadow_return_pct)}
+                  </dd>
+                  {shadowPerformance.human_decision_action && (
+                    <>
+                      <dt className="text-zinc-500 dark:text-zinc-400">Human decision</dt>
+                      <dd>{shadowPerformance.human_decision_action.replace(/_/g, " ")}</dd>
+                    </>
+                  )}
+                </dl>
               )}
             </div>
           </Card>

@@ -21,8 +21,10 @@ from app.db_models import (
     RedTeamReportRecord,
     ResearchJobRecord,
     RiskAssessmentRecord,
+    ShadowPositionRecord,
     TradeProposalRecord,
 )
+from app.evaluation.outcomes import evaluate_shadow_position, freeze_proposal
 from app.ingestion.sec_edgar import TickerNotFoundError, fetch_filing_evidence
 from app.llm import (
     ModelGatewayNotConfiguredError,
@@ -43,6 +45,8 @@ from app.schemas import (
     ResearchJob,
     ResearchSummary,
     RiskAssessment,
+    ShadowPerformanceResponse,
+    ShadowPosition,
     TradeProposal,
 )
 from app.schemas.research_job import ResearchJobStatus
@@ -473,6 +477,16 @@ def synthesize_trade_proposal(
     )
     db.add(record)
 
+    # Freeze unconditionally, before any human decision exists - this is what lets
+    # the firm grade its own calls (including rejected ones) against reality.
+    try:
+        shadow = freeze_proposal(job.id, proposal.id, job.ticker, proposal.action)
+    except MarketDataError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"market data request failed: {e}")
+    db.add(ShadowPositionRecord(**shadow.model_dump(exclude={"action"}), action=shadow.action.value))
+
     job.status = ResearchJobStatus.TRADE_PROPOSAL_COMPLETE.value
     db.add(job)
     db.commit()
@@ -586,3 +600,47 @@ async def list_human_decisions(
         .all()
     )
     return [HumanDecision.model_validate(row) for row in rows]
+
+
+@app.get("/research/{job_id}/shadow-performance")
+def get_shadow_performance(
+    job_id: UUID, db: Session = Depends(get_db)
+) -> ShadowPerformanceResponse:
+    _get_job_or_404(job_id, db)
+
+    shadow_row = (
+        db.query(ShadowPositionRecord)
+        .filter(ShadowPositionRecord.research_job_id == job_id)
+        .order_by(ShadowPositionRecord.frozen_at.desc())
+        .first()
+    )
+    if shadow_row is None:
+        raise HTTPException(
+            status_code=400,
+            detail="no frozen shadow position for this job yet; synthesize a trade proposal first",
+        )
+    shadow = ShadowPosition.model_validate(shadow_row)
+
+    try:
+        performance = evaluate_shadow_position(shadow)
+    except MarketDataError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"market data request failed: {e}")
+
+    decision_row = (
+        db.query(HumanDecisionRecord)
+        .filter(HumanDecisionRecord.research_job_id == job_id)
+        .order_by(HumanDecisionRecord.decided_at.desc())
+        .first()
+    )
+
+    return ShadowPerformanceResponse(
+        shadow_position=shadow,
+        current_price=performance.current_price,
+        current_price_as_of=performance.current_price_as_of,
+        days_since_frozen=performance.days_since_frozen,
+        raw_price_return_pct=performance.raw_price_return_pct,
+        shadow_return_pct=performance.shadow_return_pct,
+        human_decision_action=decision_row.action if decision_row else None,
+    )
