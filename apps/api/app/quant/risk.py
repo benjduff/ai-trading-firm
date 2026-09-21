@@ -1,16 +1,20 @@
 """Deterministic position sizing / stop-loss heuristics. No LLM involved,
 per CLAUDE.md's non-negotiable rule: LLMs interpret, deterministic Python
 calculates. Reuses Quant's already-computed volatility/drawdown - does not
-fetch new data or do new research.
+fetch new data or do new research (except querying current portfolio state
+from apps/execution over HTTP, which is existing fact, not research).
 
-v1: single-trade sizing only. No portfolio-level limits (concentration,
-correlation across current holdings, capital-at-risk budgets) - those need
-tracked portfolio state, which doesn't exist until paper trading (Phase 12).
-Extend this module then rather than replacing it."""
+v2: adds a per-ticker concentration check against currently-held positions.
+Still no correlation-across-holdings or portfolio-level VaR - extend this
+module further once that's needed, rather than replacing it."""
 
 import math
+from typing import Optional
 from uuid import UUID
 
+import httpx
+
+from app.config import settings
 from app.schemas.quant import QuantMetrics
 from app.schemas.risk import RiskAssessment
 
@@ -20,8 +24,31 @@ DEFAULT_MAX_POSITION_PCT = 5.0
 DEFAULT_TARGET_VOL_CONTRIBUTION_PCT = 1.0
 DEFAULT_STOP_LOSS_VOL_MULTIPLE = 2.0
 DEFAULT_ASSUMED_HOLDING_DAYS = 10
+DEFAULT_PORTFOLIO_MAX_POSITION_PCT = 10.0
 
 HIGH_DRAWDOWN_THRESHOLD = -0.30
+
+
+def _fetch_existing_position_pct(ticker: str) -> Optional[float]:
+    """% of account equity currently held in this ticker, or None if the
+    execution service is unreachable - risk assessment must still work when it's
+    down, just without portfolio-awareness (and it says so in a note)."""
+    try:
+        response = httpx.get(f"{settings.execution_service_url}/account", timeout=10.0)
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+
+    account = response.json()
+    equity = account.get("equity") or 0.0
+    if equity <= 0:
+        return 0.0
+
+    for position in account.get("positions", []):
+        if position.get("ticker", "").upper() == ticker.upper():
+            market_value = abs(position.get("market_value") or 0.0)
+            return market_value / equity * 100.0
+    return 0.0
 
 
 def assess_risk(
@@ -32,6 +59,7 @@ def assess_risk(
     target_vol_contribution_pct: float = DEFAULT_TARGET_VOL_CONTRIBUTION_PCT,
     stop_loss_vol_multiple: float = DEFAULT_STOP_LOSS_VOL_MULTIPLE,
     assumed_holding_days: int = DEFAULT_ASSUMED_HOLDING_DAYS,
+    portfolio_max_position_pct: float = DEFAULT_PORTFOLIO_MAX_POSITION_PCT,
 ) -> RiskAssessment:
     annualized_volatility = quant_metrics.annualized_volatility
 
@@ -62,6 +90,23 @@ def assess_risk(
             "fell back to the max position cap rather than vol-scaling"
         )
 
+    existing_position_pct = _fetch_existing_position_pct(ticker)
+    if existing_position_pct is None:
+        notes.append(
+            "execution service unreachable; sizing does not account for "
+            "existing positions in this ticker"
+        )
+    else:
+        available_room_pct = max(0.0, portfolio_max_position_pct - existing_position_pct)
+        if suggested_position_size_pct > available_room_pct:
+            notes.append(
+                f"reduced from {suggested_position_size_pct:.2f}% to "
+                f"{available_room_pct:.2f}% - existing position is already "
+                f"{existing_position_pct:.2f}% of equity, against a "
+                f"{portfolio_max_position_pct:.2f}% per-ticker concentration cap"
+            )
+            suggested_position_size_pct = available_room_pct
+
     return RiskAssessment(
         research_job_id=research_job_id,
         ticker=ticker.upper(),
@@ -70,5 +115,7 @@ def assess_risk(
         stop_loss_distance_pct=stop_loss_distance_pct,
         max_position_pct_cap=max_position_pct,
         target_position_volatility_contribution_pct=target_vol_contribution_pct,
+        existing_position_pct=existing_position_pct,
+        portfolio_max_position_pct_cap=portfolio_max_position_pct,
         notes=notes,
     )

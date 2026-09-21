@@ -1,14 +1,16 @@
 from datetime import datetime, timezone
+from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class RiskAssessment(BaseModel):
-    """Deterministic single-trade sizing/stop guidance computed from QuantMetrics.
-    No LLM is involved - see app/quant/risk.py. v1: no portfolio-level limits yet
-    (concentration, correlation across current holdings); those need tracked
-    portfolio state that doesn't exist until paper trading."""
+    """Deterministic single-trade sizing/stop guidance computed from QuantMetrics
+    plus current portfolio state (queried from apps/execution over HTTP). No LLM
+    is involved - see app/quant/risk.py. v2: adds a per-ticker concentration
+    check against existing positions; still no correlation-across-holdings or
+    portfolio-level VaR - a further extension once that's needed."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -22,4 +24,6 @@ class RiskAssessment(BaseModel):
     stop_loss_distance_pct: float
     max_position_pct_cap: float
     target_position_volatility_contribution_pct: float
+    existing_position_pct: Optional[float] = None
+    portfolio_max_position_pct_cap: float
     notes: list[str] = Field(default_factory=list)

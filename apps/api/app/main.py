@@ -37,6 +37,7 @@ from app.quant.market_data import MarketDataError
 from app.quant.risk import assess_risk
 from app.requests import CreateHumanDecisionRequest, CreateResearchRequest
 from app.schemas import (
+    AccountSummary,
     Evidence,
     ExecutedOrder,
     FundamentalReport,
@@ -723,3 +724,19 @@ def get_order(job_id: UUID, db: Session = Depends(get_db)) -> ExecutedOrder:
         )
 
     return ExecutedOrder.model_validate(response.json())
+
+
+@app.get("/portfolio")
+async def get_portfolio() -> AccountSummary:
+    try:
+        response = httpx.get(f"{settings.execution_service_url}/account", timeout=15.0)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"execution service unreachable: {e}")
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=response.json().get("detail", response.text),
+        )
+
+    return AccountSummary.model_validate(response.json())

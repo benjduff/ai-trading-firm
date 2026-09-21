@@ -27,3 +27,28 @@ class ExecutedOrder(BaseModel):
     filled_price: Optional[float] = None
     filled_at: Optional[datetime] = None
     error: Optional[str] = None
+
+
+class PositionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ticker: str
+    quantity: int
+    average_entry_price: float
+    cost_basis: float
+    current_price: Optional[float] = None
+    market_value: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
+    unrealized_pnl_pct: Optional[float] = None
+    price_error: Optional[str] = None
+
+
+class AccountSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    equity: float
+    total_market_value: float
+    total_unrealized_pnl: float
+    exposure_pct: float
+    position_count: int
+    positions: list[PositionResponse]

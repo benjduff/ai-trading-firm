@@ -21,6 +21,20 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# The database also holds tables owned by apps/execution (a separate service -
+# see apps/execution/app/readonly_models.py for the other half of this
+# boundary). Without this filter, autogenerate would compare the whole
+# reflected schema against apps/api's metadata and propose DROPping them - this
+# already happened once and was caught before being applied. Restrict
+# reflection to only the tables actually defined on apps/api's Base.
+OWNED_TABLES = {t.name for t in Base.metadata.tables.values()}
+
+
+def include_name(name, type_, parent_names):
+    if type_ == "table":
+        return name in OWNED_TABLES
+    return True
+
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
@@ -45,6 +59,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_name=include_name,
     )
 
     with context.begin_transaction():
@@ -66,7 +81,9 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            include_name=include_name,
         )
 
         with context.begin_transaction():

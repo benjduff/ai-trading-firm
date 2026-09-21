@@ -8,9 +8,15 @@ from app.broker import BrokerError, get_broker
 from app.db import get_db
 from app.db_models import ExecutedOrderRecord
 from app.market_data import MarketDataError
+from app.portfolio import get_account_summary, get_positions
 from app.readonly_models import HumanDecisionRecord, TradeProposalRecord
 from app.risk_rules import RiskRuleViolation, validate_order
-from app.schemas import ExecutedOrder, ExecuteRequest
+from app.schemas import (
+    AccountSummaryResponse,
+    ExecutedOrder,
+    ExecuteRequest,
+    PositionResponse,
+)
 
 app = FastAPI(title="AI Trading Firm Execution Service", version="0.1.0")
 
@@ -144,3 +150,20 @@ async def get_order(
             status_code=404, detail="no order found for this trade proposal"
         )
     return ExecutedOrder.model_validate(record)
+
+
+@app.get("/positions")
+def list_positions(db: Session = Depends(get_db)) -> list[PositionResponse]:
+    orders = db.query(ExecutedOrderRecord).all()
+    positions = get_positions(orders, get_broker())
+    return [PositionResponse.model_validate(p) for p in positions]
+
+
+@app.get("/account")
+def get_account(db: Session = Depends(get_db)) -> AccountSummaryResponse:
+    orders = db.query(ExecutedOrderRecord).all()
+    try:
+        summary = get_account_summary(orders, get_broker())
+    except BrokerError as e:
+        raise HTTPException(status_code=502, detail=f"broker error: {e}")
+    return AccountSummaryResponse.model_validate(summary)

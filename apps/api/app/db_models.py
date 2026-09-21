@@ -182,6 +182,10 @@ class RiskAssessmentRecord(Base):
     target_position_volatility_contribution_pct: Mapped[float] = mapped_column(
         Float, nullable=False
     )
+    existing_position_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    portfolio_max_position_pct_cap: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default="10.0"
+    )
     notes: Mapped[list] = mapped_column(PG_ARRAY(Text), nullable=False)
 
 
