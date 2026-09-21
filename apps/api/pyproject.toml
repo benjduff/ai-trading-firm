@@ -14,3 +14,11 @@ dependencies = [
 ]
 [tool.fastapi]
 entrypoint = "app.main:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
