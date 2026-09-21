@@ -103,6 +103,21 @@ type ShadowPerformance = {
   human_decision_action: string | null;
 };
 
+type ExecutedOrder = {
+  ticker: string;
+  side: string;
+  quantity: number;
+  order_type: string;
+  broker: string;
+  broker_order_id: string | null;
+  stop_loss_price: number | null;
+  status: string;
+  submitted_at: string;
+  filled_price: number | null;
+  filled_at: string | null;
+  error: string | null;
+};
+
 type ResearchJob = {
   id: string;
   ticker: string;
@@ -220,6 +235,48 @@ export default function ResearchDashboard() {
       setShadowError("Could not reach the research API. Is it running?");
     } finally {
       setShadowLoading(false);
+    }
+  }
+
+  const [order, setOrder] = useState<ExecutedOrder | null>(null);
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
+
+  async function fetchOrder() {
+    setOrderLoading(true);
+    setOrderError(null);
+    try {
+      const res = await fetch(`${API_URL}/research/${jobId}/order`);
+      const body = await res.json();
+      if (!res.ok) {
+        setOrderError(extractErrorMessage(body));
+        return;
+      }
+      setOrder(body as ExecutedOrder);
+    } catch {
+      setOrderError("Could not reach the research API. Is it running?");
+    } finally {
+      setOrderLoading(false);
+    }
+  }
+
+  async function executeTrade() {
+    setOrderLoading(true);
+    setOrderError(null);
+    try {
+      const res = await fetch(`${API_URL}/research/${jobId}/execute`, {
+        method: "POST",
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setOrderError(extractErrorMessage(body));
+        return;
+      }
+      setOrder(body as ExecutedOrder);
+    } catch {
+      setOrderError("Could not reach the research API. Is it running?");
+    } finally {
+      setOrderLoading(false);
     }
   }
 
@@ -633,6 +690,57 @@ export default function ResearchDashboard() {
             </p>
           )}
         </Card>
+
+        {human_decision?.action === "approve" && (
+          <Card title="Execution">
+            <div className="space-y-3 text-sm text-black dark:text-zinc-50">
+              <p className="text-xs text-zinc-500">
+                This places a real order through the execution service (paper trading, kept separate from the research system). It only runs once, per proposal - re-clicking after an order exists just checks its status.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={executeTrade}
+                  disabled={orderLoading}
+                  className="rounded bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
+                >
+                  {orderLoading ? "Working..." : "Execute Trade"}
+                </button>
+                <button
+                  onClick={fetchOrder}
+                  disabled={orderLoading}
+                  className="rounded border border-black/[.15] px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-black/[.04] disabled:opacity-50 dark:border-white/[.2] dark:text-zinc-50 dark:hover:bg-white/[.06]"
+                >
+                  Check order status
+                </button>
+              </div>
+              {orderError && (
+                <p className="text-red-600 dark:text-red-400">{orderError}</p>
+              )}
+              {order && (
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
+                  <dt className="text-zinc-500 dark:text-zinc-400">Side / Qty</dt>
+                  <dd>{order.side.toUpperCase()} {order.quantity}</dd>
+                  <dt className="text-zinc-500 dark:text-zinc-400">Status</dt>
+                  <dd>{order.status}</dd>
+                  <dt className="text-zinc-500 dark:text-zinc-400">Broker</dt>
+                  <dd>{order.broker}</dd>
+                  <dt className="text-zinc-500 dark:text-zinc-400">Filled price</dt>
+                  <dd>{order.filled_price !== null ? `$${order.filled_price.toFixed(2)}` : "—"}</dd>
+                  <dt className="text-zinc-500 dark:text-zinc-400">Stop-loss price</dt>
+                  <dd>{order.stop_loss_price !== null ? `$${order.stop_loss_price.toFixed(2)}` : "—"}</dd>
+                  <dt className="text-zinc-500 dark:text-zinc-400">Broker order ID</dt>
+                  <dd>{order.broker_order_id ?? "—"}</dd>
+                  {order.error && (
+                    <>
+                      <dt className="text-zinc-500 dark:text-zinc-400">Error</dt>
+                      <dd className="text-red-600 dark:text-red-400">{order.error}</dd>
+                    </>
+                  )}
+                </dl>
+              )}
+            </div>
+          </Card>
+        )}
       </main>
     </div>
   );

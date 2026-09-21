@@ -13,6 +13,8 @@ class Settings(BaseSettings):
 
     polygon_api_key: Optional[str] = None
 
+    execution_service_url: str = "http://localhost:8100"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

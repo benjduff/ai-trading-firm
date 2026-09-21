@@ -24,6 +24,7 @@ from app.db_models import (
     ShadowPositionRecord,
     TradeProposalRecord,
 )
+from app.config import settings
 from app.evaluation.outcomes import evaluate_shadow_position, freeze_proposal
 from app.ingestion.sec_edgar import TickerNotFoundError, fetch_filing_evidence
 from app.llm import (
@@ -37,6 +38,7 @@ from app.quant.risk import assess_risk
 from app.requests import CreateHumanDecisionRequest, CreateResearchRequest
 from app.schemas import (
     Evidence,
+    ExecutedOrder,
     FundamentalReport,
     HumanDecision,
     PsychologyReport,
@@ -644,3 +646,80 @@ def get_shadow_performance(
         shadow_return_pct=performance.shadow_return_pct,
         human_decision_action=decision_row.action if decision_row else None,
     )
+
+
+def _latest_trade_proposal(job_id: UUID, db: Session) -> TradeProposalRecord:
+    proposal = (
+        db.query(TradeProposalRecord)
+        .filter(TradeProposalRecord.research_job_id == job_id)
+        .order_by(TradeProposalRecord.created_at.desc())
+        .first()
+    )
+    if proposal is None:
+        raise HTTPException(
+            status_code=400, detail="no trade proposal for this job yet"
+        )
+    return proposal
+
+
+@app.post("/research/{job_id}/execute", status_code=201)
+def execute_trade(job_id: UUID, db: Session = Depends(get_db)) -> ExecutedOrder:
+    """Proxies a human-triggered request to the separate execution service. This
+    app never talks to a broker itself - it only forwards the click, and the
+    execution service independently re-verifies an approved decision exists
+    before doing anything. See apps/execution for why that separation matters."""
+    job = _get_job_or_404(job_id, db)
+    proposal = _latest_trade_proposal(job_id, db)
+
+    decision = (
+        db.query(HumanDecisionRecord)
+        .filter(HumanDecisionRecord.research_job_id == job_id)
+        .order_by(HumanDecisionRecord.decided_at.desc())
+        .first()
+    )
+    if decision is None or decision.action != "approve":
+        raise HTTPException(
+            status_code=400,
+            detail="no approved human decision for this job; approve the proposal first",
+        )
+
+    try:
+        response = httpx.post(
+            f"{settings.execution_service_url}/execute",
+            json={"trade_proposal_id": str(proposal.id)},
+            timeout=30.0,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"execution service unreachable: {e}")
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=response.json().get("detail", response.text),
+        )
+
+    job.status = ResearchJobStatus.ORDER_EXECUTED.value
+    db.add(job)
+    db.commit()
+
+    return ExecutedOrder.model_validate(response.json())
+
+
+@app.get("/research/{job_id}/order")
+def get_order(job_id: UUID, db: Session = Depends(get_db)) -> ExecutedOrder:
+    proposal = _latest_trade_proposal(job_id, db)
+
+    try:
+        response = httpx.get(
+            f"{settings.execution_service_url}/orders/{proposal.id}", timeout=10.0
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"execution service unreachable: {e}")
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=response.json().get("detail", response.text),
+        )
+
+    return ExecutedOrder.model_validate(response.json())
